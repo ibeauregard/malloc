@@ -3,9 +3,9 @@
 
 #include <stddef.h>
 
-void* malloc(size_t size);
-void free(void* ptr);
-void* calloc(size_t num, size_t size);
-void* realloc(void* ptr, size_t size);
+void* malloc_(size_t size);
+void free_(void* ptr);
+void* calloc_(size_t num, size_t size);
+void* realloc_(void* ptr, size_t size);
 
 #endif
