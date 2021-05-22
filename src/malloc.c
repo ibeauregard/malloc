@@ -20,13 +20,14 @@ struct header {
     uint64_t size:63;
     uint64_t free:1;
     header_t* next;
+    header_t* prev;
 };
 
 static header_t dummy_header = {.size = 0};
 
 /*
  * This is used to get the offset between the beginning of a block and the beginning of the memory zone where
- * the user can write. The user can write over the `next` pointer while the block is in use.
+ * the user can write. The user can write over the `next` and `prev` pointers while the block is in use.
  */
 #define HEADER_SIZE sizeof (uint64_t)
 
@@ -47,9 +48,10 @@ typedef struct footer {
 #define FOOTER_SIZE sizeof (footer_t)
 
 /*
- * The smallest block size that this program can manage.
+ * The smallest block size that this program can manage. We need to be able to store the next and prev pointers after
+ * the size in the header, hence the 16 bytes minimum.
  */
-#define MIN_ALLOC (MEM_UNIT + HEADER_SIZE + FOOTER_SIZE)
+#define MIN_ALLOC (16 + HEADER_SIZE + FOOTER_SIZE)
 
 /*
  * The smallest unit of memory we can request from or release to the OS.
@@ -60,9 +62,9 @@ typedef struct footer {
 /*
  * Memory blocks available to the user are stored in buckets, each of which is associated with a certain size range.
  * Here is the index to size mapping :
- * 0:   <empty>
- * 1:   <empty>
- * 2:   <empty>
+ * 0:   0
+ * 1:   8
+ * 2:   16
  * 3:   24
  * 4:   32
  * 5:   40
@@ -94,14 +96,14 @@ static bool initialized = false;
 static void initialize_buckets();
 static void align_size(size_t* size);
 static header_t* get_block_from_buckets(size_t size);
-static header_t* get_block_from_os(size_t size);
+//static header_t* get_block_from_os(size_t size);
 void* malloc_(size_t size)
 {
     if (size == 0) return NULL;
     if (!initialized) initialize_buckets();
     align_size(&size);
     header_t* header = get_block_from_buckets(size);
-    if (!header) header = get_block_from_os(size);
+//    if (!header) header = get_block_from_os(size);
     if (!header) return NULL;
     header->free = 0;
     return header + HEADER_SIZE;
@@ -109,9 +111,8 @@ void* malloc_(size_t size)
 
 void initialize_buckets()
 {
-    dummy_header.next = &dummy_header;
-    /* First three buckets are empty */
-    for (uint8_t i = 3; i < NUM_BUCKETS; i++) {
+    dummy_header.next = dummy_header.prev = &dummy_header;
+    for (uint8_t i = 0; i < NUM_BUCKETS; i++) {
         buckets[i] = &dummy_header;
     }
     initialized = true;
@@ -203,6 +204,8 @@ void insert_into_bucket(header_t* block_to_insert, header_t* bucket)
         uint64_t next_block_size = pre_insertion_block->next->size;
         if (next_block_size == 0 || next_block_size > block_to_insert->size) break;
     }
+    block_to_insert->prev = pre_insertion_block;
     block_to_insert->next = pre_insertion_block->next;
     pre_insertion_block->next = block_to_insert;
+    block_to_insert->next->prev = block_to_insert;
 }

@@ -1,6 +1,11 @@
+#include "malloc.h"
+
 #include <stdio.h>
+#include <string.h>
 
 int main() {
-    printf("Hello, World!\n");
+    char* message = malloc_(32);
+    strcpy(message, "Roger, Cyr!");
+    printf("%s\n", message);
     return 0;
 }
