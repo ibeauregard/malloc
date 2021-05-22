@@ -3,6 +3,10 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <sys/mman.h>
+#include <stdio.h>
+#include <errno.h>
+#include <string.h>
 
 /*
  * The smallest unit of memory a user can request: 8 bytes, or 64 bits. We want to stay 8-byte aligned.
@@ -96,14 +100,14 @@ static bool initialized = false;
 static void initialize_buckets();
 static void align_size(size_t* size);
 static header_t* get_block_from_buckets(size_t size);
-//static header_t* get_block_from_os(size_t size);
+static header_t* get_block_from_os(size_t size);
 void* malloc_(size_t size)
 {
     if (size == 0) return NULL;
     if (!initialized) initialize_buckets();
     align_size(&size);
     header_t* header = get_block_from_buckets(size);
-//    if (!header) header = get_block_from_os(size);
+    if (!header) header = get_block_from_os(size);
     if (!header) return NULL;
     header->free = 0;
     return header + HEADER_SIZE;
@@ -118,12 +122,18 @@ void initialize_buckets()
     initialized = true;
 }
 
+static void round_up_power_of_two(size_t* number, size_t power);
 void align_size(size_t* size)
 {
     /* Round size up, to the closest multiple of MEM_UNIT, assuming that MEM_UNIT is a power of two. */
-    *size = (*size + (MEM_UNIT - 1)) & ~(MEM_UNIT - 1);
-
+    round_up_power_of_two(size, MEM_UNIT);
     *size += HEADER_SIZE + FOOTER_SIZE;
+    *size = *size >= MIN_ALLOC ? *size : MIN_ALLOC;
+}
+
+inline void round_up_power_of_two(size_t* number, size_t power)
+{
+    *number = (*number + (power - 1)) & ~(power - 1);
 }
 
 static uint8_t bucket_index_from_size(size_t size);
@@ -166,7 +176,7 @@ static void split_after(header_t* block, size_t size);
 static void update_size(header_t* block, size_t size);
 header_t* adjusted_block(header_t* block, size_t size)
 {
-    if (block->size <= size + MIN_ALLOC) return block;
+    if (block->size < size + MIN_ALLOC) return block;
     split_after(block, size);
     update_size(block, size);
     return block;
@@ -176,7 +186,7 @@ static void insert_into_buckets(header_t* block);
 void split_after(header_t* block, size_t size)
 {
     size_t remaining_size = block->size - size;
-    header_t* new_block = block + size;
+    header_t* new_block = (header_t*) ((uintptr_t) block + size);
     update_size(new_block, remaining_size);
     new_block->free = 1;
     insert_into_buckets(new_block);
@@ -184,7 +194,7 @@ void split_after(header_t* block, size_t size)
 
 inline void update_size(header_t* block, size_t size)
 {
-    block->size = ((footer_t*) block + size - FOOTER_SIZE)->size = size;
+    block->size = ((footer_t*) ((uintptr_t) block + size - FOOTER_SIZE))->size = size;
 }
 
 static void insert_into_bucket(header_t* block_to_insert, header_t* bucket);
@@ -208,4 +218,31 @@ void insert_into_bucket(header_t* block_to_insert, header_t* bucket)
     block_to_insert->next = pre_insertion_block->next;
     pre_insertion_block->next = block_to_insert;
     block_to_insert->next->prev = block_to_insert;
+}
+
+static uintptr_t heap_floor = 0;
+static uintptr_t program_break;
+
+header_t* get_block_from_os(size_t size)
+{
+    size_t requested_size = size;
+    round_up_power_of_two(&requested_size, SYS_REQUEST_UNIT);
+    uintptr_t new_mapping =
+            (uintptr_t) mmap(0, requested_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    if ((void*) new_mapping == MAP_FAILED) {
+        fprintf(stderr, "malloc: mmap failed: %s\n", strerror(errno));
+        return NULL;
+    }
+    if (!heap_floor) heap_floor = new_mapping;
+    program_break = new_mapping + requested_size;
+    if (requested_size - size >= MIN_ALLOC) {
+        header_t* leftover_block = (header_t*) ((uintptr_t) new_mapping + size);
+        update_size(leftover_block, requested_size - size);
+        insert_into_buckets(leftover_block);
+    } else {
+        size = requested_size;
+    }
+    header_t* main_block = (header_t*) new_mapping;
+    update_size(main_block, size);
+    return main_block;
 }
