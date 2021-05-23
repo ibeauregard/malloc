@@ -42,8 +42,6 @@ static header_t dummy_header = {.size = 0};
  */
 #define METADATA_OFFSET sizeof (uint64_t)
 
-#define HEADER_SIZE sizeof (header_t)
-
 /*
  * An 8-byte, single-member data structure that is kept at the end of every managed memory block. It also stores
  * the size of the block, including its metadata (header and footer). The purpose of this structure is to allow the
@@ -58,12 +56,10 @@ typedef struct footer {
     uint64_t size;
 } footer_t;
 
-#define FOOTER_SIZE sizeof (footer_t)
-
 /*
  * The smallest block size that this program can manage.
  */
-#define MIN_ALLOC (HEADER_SIZE + FOOTER_SIZE)
+#define MIN_ALLOC (sizeof (header_t) + sizeof (footer_t))
 
 /*
  * The smallest unit of memory we can request from the OS.
@@ -139,7 +135,7 @@ void free_(void* ptr)
     }
     /* If block is the first block of its mapping, there is no previous block to potentially coalesce with. */
     if ((uintptr_t) block == mappings[block->mapping][0]) return;
-    uint64_t previous_block_size = ((footer_t*) ((uintptr_t) block - FOOTER_SIZE))->size;
+    uint64_t previous_block_size = ((footer_t*) block - 1)->size;
     header_t* previous_block = (header_t*) ((uintptr_t) block - previous_block_size);
     if (previous_block->free) {
         coalesce(previous_block, block);
@@ -159,7 +155,7 @@ static void round_up_power_of_two(size_t* number, size_t power);
 void align_size(size_t* size)
 {
     round_up_power_of_two(size, MEM_UNIT);
-    *size += METADATA_OFFSET + FOOTER_SIZE;
+    *size += METADATA_OFFSET + sizeof (footer_t);
     *size = *size >= MIN_ALLOC ? *size : MIN_ALLOC;
 }
 
@@ -231,7 +227,7 @@ void split_after(header_t* block, size_t size)
 
 inline void update_size(header_t* block, size_t size)
 {
-    block->size = ((footer_t*) ((uintptr_t) block + size - FOOTER_SIZE))->size = size;
+    block->size = ((footer_t*) ((uintptr_t) block + size) - 1)->size = size;
 }
 
 static void insert_into_bucket(header_t* block_to_insert, header_t* bucket);
