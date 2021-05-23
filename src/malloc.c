@@ -144,9 +144,7 @@ void free_(void* ptr)
 
 void* calloc_(size_t num, size_t size)
 {
-    /* The test of the ternary operator checks if size_t is at least 64 bits. */
-    static const uint32_t MAX_SIZE_T_SQRT = (size_t) -1 / 641u / 6700417u >= 4294967295u ? 4294967295 : 65535;
-    if (num == 0 || ((num > MAX_SIZE_T_SQRT || size > MAX_SIZE_T_SQRT) && size > (size_t) -1 / num)) {
+    if (num == 0 || size > (size_t) -1 / num) {
         errno = EINVAL;
         return NULL;
     }
