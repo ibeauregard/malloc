@@ -34,8 +34,6 @@ struct header {
     header_t* prev;
 };
 
-static header_t dummy_header = {.size = 0};
-
 /*
  * This is used to get the offset between the beginning of a block and the beginning of the memory zone where
  * the user can write. The user can write over the `next` and `prev` pointers while the block is in use.
@@ -120,7 +118,7 @@ void* malloc_(size_t size)
 }
 
 static void insert_into_buckets(header_t* block);
-static void coalesce(header_t* lower_block, header_t* higher_block);
+static void coalesce(header_t* lower, header_t* higher);
 void free_(void* ptr)
 {
     if (!ptr) return;
@@ -135,8 +133,7 @@ void free_(void* ptr)
     }
     /* If block is the first block of its mapping, there is no previous block to potentially coalesce with. */
     if ((uintptr_t) block == mappings[block->mapping][0]) return;
-    uint64_t previous_block_size = ((footer_t*) block - 1)->size;
-    header_t* previous_block = (header_t*) ((uintptr_t) block - previous_block_size);
+    header_t* previous_block = (header_t*) ((uintptr_t) block - ((footer_t*) block - 1)->size);
     if (previous_block->free) {
         coalesce(previous_block, block);
     }
@@ -144,6 +141,7 @@ void free_(void* ptr)
 
 void initialize_buckets()
 {
+    static header_t dummy_header = {.size = 0};
     for (uint8_t i = 0; i < NUM_BUCKETS; i++) {
         buckets[i] = dummy_header;
         buckets[i].next = buckets[i].prev = &buckets[i];
@@ -289,10 +287,10 @@ void* get_mapping(size_t size)
     return mapping;
 }
 
-void coalesce(header_t* lower_block, header_t* higher_block)
+void coalesce(header_t* lower, header_t* higher)
 {
-    remove_from_bucket(lower_block);
-    remove_from_bucket(higher_block);
-    update_size(lower_block, lower_block->size + higher_block->size);
-    insert_into_buckets(lower_block);
+    remove_from_bucket(lower);
+    remove_from_bucket(higher);
+    update_size(lower, lower->size + higher->size);
+    insert_into_buckets(lower);
 }
