@@ -15,13 +15,20 @@
 #define MEM_UNIT 8 // bytes
 
 /*
- * An 8-byte data structure that precedes all managed memory blocks. The first 63 bits represent the size
- * of the block, including its metadata (header and footer). The least significant bit is 1 if the block is free,
- * 0 otherwise.
+ * Be careful before changing the value of this constant. There will be an impact on the header_t data structure.
+ */
+#define LOG2_NUM_MAPPINGS 15
+
+/*
+ * An 8-byte data structure that precedes all managed memory blocks. The first 48 bits represent the size
+ * of the block, including its metadata (header and footer). The next 15 bits represent the index of the memory mapping
+ * where the block is located. (Memory mappings are created by calls to mmap(2).) The least significant bit is 1
+ * if the block is free, 0 otherwise.
  */
 typedef struct header header_t;
 struct header {
-    uint64_t size:63;
+    uint64_t size:48;
+    uint64_t mapping:LOG2_NUM_MAPPINGS;
     uint64_t free:1;
     header_t* next;
     header_t* prev;
@@ -33,7 +40,9 @@ static header_t dummy_header = {.size = 0};
  * This is used to get the offset between the beginning of a block and the beginning of the memory zone where
  * the user can write. The user can write over the `next` and `prev` pointers while the block is in use.
  */
-#define HEADER_SIZE sizeof (uint64_t)
+#define METADATA_OFFSET sizeof (uint64_t)
+
+#define HEADER_SIZE sizeof (header_t)
 
 /*
  * An 8-byte, single-member data structure that is kept at the end of every managed memory block. It also stores
@@ -52,16 +61,14 @@ typedef struct footer {
 #define FOOTER_SIZE sizeof (footer_t)
 
 /*
- * The smallest block size that this program can manage. We need to be able to store the next and prev pointers after
- * the size in the header, hence the 16 bytes minimum.
+ * The smallest block size that this program can manage.
  */
-#define MIN_ALLOC (16 + HEADER_SIZE + FOOTER_SIZE)
+#define MIN_ALLOC (HEADER_SIZE + FOOTER_SIZE)
 
 /*
- * The smallest unit of memory we can request from or release to the OS.
+ * The smallest unit of memory we can request from the OS.
  */
-#define SYS_REQUEST_UNIT sysconf(_SC_PAGESIZE)
-#define SYS_RELEASE_UNIT SYS_REQUEST_UNIT
+#define SYS_REQUEST_UNIT ((1 << 5) * sysconf(_SC_PAGESIZE))
 
 /*
  * Memory blocks available to the user are stored in buckets, each of which is associated with a certain size range.
@@ -109,8 +116,8 @@ void* malloc_(size_t size)
     header_t* header = get_block_from_buckets(size);
     if (!header) header = get_block_from_os(size);
     if (!header) return NULL;
-    header->free = 0;
-    return header + HEADER_SIZE;
+    header->free = false;
+    return (void*) ((uintptr_t) header + METADATA_OFFSET);
 }
 
 void initialize_buckets()
@@ -125,9 +132,8 @@ void initialize_buckets()
 static void round_up_power_of_two(size_t* number, size_t power);
 void align_size(size_t* size)
 {
-    /* Round size up, to the closest multiple of MEM_UNIT, assuming that MEM_UNIT is a power of two. */
     round_up_power_of_two(size, MEM_UNIT);
-    *size += HEADER_SIZE + FOOTER_SIZE;
+    *size += METADATA_OFFSET + FOOTER_SIZE;
     *size = *size >= MIN_ALLOC ? *size : MIN_ALLOC;
 }
 
@@ -161,8 +167,6 @@ static header_t* adjusted_block(header_t* block, size_t size);
 header_t* get_block_from_bucket(header_t* bucket, size_t size)
 {
     header_t* block = bucket;
-    /* This is the condition to signal an empty bucket. */
-    if (block->next == block) return NULL;
     block = block->next;
     for (; block->size > 0; block = block->next) {
         if (block->size >= size) {
@@ -188,7 +192,7 @@ void split_after(header_t* block, size_t size)
     size_t remaining_size = block->size - size;
     header_t* new_block = (header_t*) ((uintptr_t) block + size);
     update_size(new_block, remaining_size);
-    new_block->free = 1;
+    new_block->mapping = block->mapping;
     insert_into_buckets(new_block);
 }
 
@@ -218,31 +222,43 @@ void insert_into_bucket(header_t* block_to_insert, header_t* bucket)
     block_to_insert->next = pre_insertion_block->next;
     pre_insertion_block->next = block_to_insert;
     block_to_insert->next->prev = block_to_insert;
+    block_to_insert->free = true;
 }
 
-static uintptr_t heap_floor = 0;
-static uintptr_t program_break;
+static uint16_t mapping_index = 0;
+static uintptr_t mappings[1 << LOG2_NUM_MAPPINGS][2];
 
+static void* get_mapping(size_t size);
 header_t* get_block_from_os(size_t size)
 {
     size_t requested_size = size;
     round_up_power_of_two(&requested_size, SYS_REQUEST_UNIT);
-    uintptr_t new_mapping =
-            (uintptr_t) mmap(0, requested_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-    if ((void*) new_mapping == MAP_FAILED) {
+    void* new_mapping = get_mapping(requested_size);
+    if (!new_mapping) return NULL;
+    header_t* main_block = (header_t*) new_mapping;
+    update_size(main_block, requested_size);
+    main_block->mapping = mapping_index++;
+    main_block = adjusted_block(main_block, size);
+    return main_block;
+}
+
+void* get_mapping(size_t size)
+{
+    void* mapping = mmap(0, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    if (mapping == MAP_FAILED) {
         fprintf(stderr, "malloc: mmap failed: %s\n", strerror(errno));
         return NULL;
     }
-    if (!heap_floor) heap_floor = new_mapping;
-    program_break = new_mapping + requested_size;
-    if (requested_size - size >= MIN_ALLOC) {
-        header_t* leftover_block = (header_t*) ((uintptr_t) new_mapping + size);
-        update_size(leftover_block, requested_size - size);
-        insert_into_buckets(leftover_block);
+    /* If this mapping begins where the previous one ended, merge them */
+    if (mapping_index > 0 && (uintptr_t) mapping == mappings[mapping_index - 1][1]) {
+        mappings[--mapping_index][1] += size;
     } else {
-        size = requested_size;
+        if (mapping_index == 1 << LOG2_NUM_MAPPINGS) {
+            fprintf(stderr, "malloc: reached maximum number of memory mappings: %u\n", 1 << LOG2_NUM_MAPPINGS);
+            return NULL;
+        }
+        mappings[mapping_index][0] = (uintptr_t) mapping;
+        mappings[mapping_index][1] = (uintptr_t) mapping + size;
     }
-    header_t* main_block = (header_t*) new_mapping;
-    update_size(main_block, size);
-    return main_block;
+    return mapping;
 }
