@@ -104,6 +104,9 @@ static header_t* buckets[NUM_BUCKETS];
 
 static bool initialized = false;
 
+static uint16_t mapping_index = 0;
+static uintptr_t mappings[1 << LOG2_NUM_MAPPINGS][2];
+
 static void initialize_buckets();
 static void align_size(size_t* size);
 static header_t* get_block_from_buckets(size_t size);
@@ -120,10 +123,27 @@ void* malloc_(size_t size)
     return (void*) ((uintptr_t) header + METADATA_OFFSET);
 }
 
+static void insert_into_buckets(header_t* block);
+static void coalesce(header_t* lower_block, header_t* higher_block);
 void free_(void* ptr)
 {
     if (!ptr) return;
     header_t* block = (header_t*) ((uintptr_t) ptr - METADATA_OFFSET);
+    insert_into_buckets(block);
+    uintptr_t next_block = (uintptr_t) block + block->size;
+
+    /* If next_block >= mappings[block->mapping][1],
+     * next_block does not point to a memory block under our management. */
+    if (next_block < mappings[block->mapping][1] && (bool) ((header_t*) next_block)->free) {
+        coalesce(block, (header_t*) next_block);
+    }
+    /* If block is the first block of its mapping, there is no previous block to potentially coalesce with. */
+    if ((uintptr_t) block == mappings[block->mapping][0]) return;
+    uint64_t previous_block_size = ((footer_t*) ((uintptr_t) block - FOOTER_SIZE))->size;
+    header_t* previous_block = (header_t*) ((uintptr_t) block - previous_block_size);
+    if (previous_block->free) {
+        coalesce(previous_block, block);
+    }
 }
 
 void initialize_buckets()
@@ -200,7 +220,6 @@ header_t* adjusted_block(header_t* block, size_t size)
     return block;
 }
 
-static void insert_into_buckets(header_t* block);
 void split_after(header_t* block, size_t size)
 {
     size_t remaining_size = block->size - size;
@@ -239,9 +258,6 @@ void insert_into_bucket(header_t* block_to_insert, header_t* bucket)
     block_to_insert->free = true;
 }
 
-static uint16_t mapping_index = 0;
-static uintptr_t mappings[1 << LOG2_NUM_MAPPINGS][2];
-
 static void* get_mapping(size_t size);
 header_t* get_block_from_os(size_t size)
 {
@@ -275,4 +291,12 @@ void* get_mapping(size_t size)
         mappings[mapping_index][1] = (uintptr_t) mapping + size;
     }
     return mapping;
+}
+
+void coalesce(header_t* lower_block, header_t* higher_block)
+{
+    remove_from_bucket(lower_block);
+    remove_from_bucket(higher_block);
+    update_size(lower_block, lower_block->size + higher_block->size);
+    insert_into_buckets(lower_block);
 }
