@@ -62,7 +62,7 @@ typedef struct footer {
 /*
  * The smallest unit of memory we can request from the OS.
  */
-#define SYS_REQUEST_UNIT ((1 << 5) * sysconf(_SC_PAGESIZE))
+#define MMAP_THRESHOLD ((1 << 5) * sysconf(_SC_PAGESIZE))
 
 /*
  * Memory blocks available to the user are stored in buckets, each of which is associated with a certain size range.
@@ -155,9 +155,28 @@ void* calloc_(size_t num, size_t size)
     return ptr;
 }
 
+static header_t* adjusted_block(header_t* block, size_t size);
+void* realloc_(void* ptr, size_t size)
+{
+    if (!ptr || !size) {
+        free_(ptr);
+        return malloc_(size);
+    }
+    header_t* block = (header_t*) ((uintptr_t) ptr - METADATA_OFFSET);
+    uint64_t old_size = block->size - METADATA_OFFSET - sizeof (footer_t);
+    if (size <= old_size) {
+        align_size(&size);
+        return (void*) ((uintptr_t) adjusted_block(block, size) + METADATA_OFFSET);
+    }
+    void* new_ptr = malloc_(size);
+    if (new_ptr) memcpy(new_ptr, ptr, old_size);
+    free_(ptr);
+    return new_ptr;
+}
+
 void initialize_buckets()
 {
-    static header_t dummy_header = {.size = 0};
+    static const header_t dummy_header = {.size = 0};
     for (uint8_t i = 0; i < NUM_BUCKETS; i++) {
         buckets[i] = dummy_header;
         buckets[i].next = buckets[i].prev = &buckets[i];
@@ -192,7 +211,7 @@ header_t* get_block_from_buckets(size_t size)
 
 uint8_t bucket_index_from_size(size_t size)
 {
-    static uint8_t index_1024 = 1024 / MEM_UNIT, log2_1024 = 10;
+    static const uint8_t index_1024 = 1024 / MEM_UNIT, log2_1024 = 10;
     if (size < 1024) return size / MEM_UNIT;
     uint8_t log2;
     for (log2 = log2_1024; 1 << (log2 + 1) <= size; log2++);
@@ -200,7 +219,6 @@ uint8_t bucket_index_from_size(size_t size)
 }
 
 static void remove_from_bucket(header_t* block);
-static header_t* adjusted_block(header_t* block, size_t size);
 header_t* get_block_from_bucket(header_t* bucket, size_t size)
 {
     header_t* block = bucket;
@@ -272,7 +290,7 @@ static void* get_mapping(size_t size);
 header_t* get_block_from_os(size_t size)
 {
     size_t requested_size = size;
-    round_up_power_of_two(&requested_size, SYS_REQUEST_UNIT);
+    round_up_power_of_two(&requested_size, MMAP_THRESHOLD);
     void* new_mapping = get_mapping(requested_size);
     if (!new_mapping) return NULL;
     header_t* main_block = (header_t*) new_mapping;
