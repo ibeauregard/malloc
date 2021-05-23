@@ -4,7 +4,7 @@
 #include <string.h>
 
 int main() {
-    char* message = malloc_(32);
+    char* message = calloc_(1, 32);
     strcpy(message, "Roger, Cyr!");
     printf("%s\n", message);
     free_(message);
