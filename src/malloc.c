@@ -107,7 +107,10 @@ static header_t* get_block_from_buckets(size_t size);
 static header_t* get_block_from_os(size_t size);
 void* malloc_(size_t size)
 {
-    if (size == 0) return NULL;
+    if (size == 0) {
+        errno = EINVAL;
+        return NULL;
+    }
     if (!initialized) initialize_buckets();
     align_size(&size);
     header_t* header = get_block_from_buckets(size);
