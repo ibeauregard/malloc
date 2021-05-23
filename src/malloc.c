@@ -96,7 +96,7 @@ typedef struct footer {
  * Because the blocks within a bucket are sorted, the search is a best-fit one.
  */
 #define NUM_BUCKETS 166
-static header_t* buckets[NUM_BUCKETS];
+static header_t buckets[NUM_BUCKETS];
 
 static bool initialized = false;
 
@@ -144,9 +144,9 @@ void free_(void* ptr)
 
 void initialize_buckets()
 {
-    dummy_header.next = dummy_header.prev = &dummy_header;
     for (uint8_t i = 0; i < NUM_BUCKETS; i++) {
-        buckets[i] = &dummy_header;
+        buckets[i] = dummy_header;
+        buckets[i].next = buckets[i].prev = &buckets[i];
     }
     initialized = true;
 }
@@ -171,7 +171,7 @@ header_t* get_block_from_buckets(size_t size)
     for (uint8_t i = bucket_index_from_size(size); i < NUM_BUCKETS ; i++)
     {
         header_t* block;
-        if ((block = get_block_from_bucket(buckets[i], size))) return block;
+        if ((block = get_block_from_bucket(&buckets[i], size))) return block;
     }
     return NULL;
 }
@@ -233,7 +233,7 @@ inline void update_size(header_t* block, size_t size)
 static void insert_into_bucket(header_t* block_to_insert, header_t* bucket);
 inline void insert_into_buckets(header_t* block)
 {
-    insert_into_bucket(block, buckets[bucket_index_from_size(block->size)]);
+    insert_into_bucket(block, &buckets[bucket_index_from_size(block->size)]);
 }
 
 /*
