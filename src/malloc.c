@@ -120,6 +120,12 @@ void* malloc_(size_t size)
     return (void*) ((uintptr_t) header + METADATA_OFFSET);
 }
 
+void free_(void* ptr)
+{
+    if (!ptr) return;
+    header_t* block = (header_t*) ((uintptr_t) ptr - METADATA_OFFSET);
+}
+
 void initialize_buckets()
 {
     dummy_header.next = dummy_header.prev = &dummy_header;
@@ -163,6 +169,7 @@ uint8_t bucket_index_from_size(size_t size)
     return log2 + (index_1024 - log2_1024);
 }
 
+static void remove_from_bucket(header_t* block);
 static header_t* adjusted_block(header_t* block, size_t size);
 header_t* get_block_from_bucket(header_t* bucket, size_t size)
 {
@@ -170,10 +177,17 @@ header_t* get_block_from_bucket(header_t* bucket, size_t size)
     block = block->next;
     for (; block->size > 0; block = block->next) {
         if (block->size >= size) {
+            remove_from_bucket(block);
             return adjusted_block(block, size);
         }
     }
     return NULL;
+}
+
+void remove_from_bucket(header_t* block)
+{
+    block->prev->next = block->next;
+    block->next->prev = block->prev;
 }
 
 static void split_after(header_t* block, size_t size);
