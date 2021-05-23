@@ -273,7 +273,7 @@ void* get_mapping(size_t size)
 {
     void* mapping = mmap(0, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
     if (mapping == MAP_FAILED) {
-        fprintf(stderr, "malloc: mmap failed: %s\n", strerror(errno));
+        errno = ENOMEM;
         return NULL;
     }
     /* If this mapping begins where the previous one ended, merge them */
