@@ -6,7 +6,7 @@
 
 #define NUM_POINTERS (1 << 10)
 #define NUM_CYCLES (1 << 10)
-#define BLOCK_SIZE_UPPER_BOUND (1 << 16)
+#define BLOCK_SIZE_UPPER_BOUND (1 << 12)
 
 typedef void* calloc_func(size_t num, size_t size);
 typedef void* realloc_func(void* ptr, size_t size);
