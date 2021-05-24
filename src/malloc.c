@@ -64,9 +64,10 @@ typedef struct footer {
  */
 #define MMAP_THRESHOLD ((1 << 5) * sysconf(_SC_PAGESIZE))
 
+#define NUM_BUCKETS 166
 /*
  * Memory blocks available to the user are stored in buckets, each of which is associated with a certain size range.
- * Here is the index to size mapping :
+ * Here is the index-to-size mapping :
  * 0:   0
  * 1:   8
  * 2:   16
@@ -93,7 +94,6 @@ typedef struct footer {
  * allocate to the user, the appropriate bucket is searched, and the first block with a sufficient size is taken.
  * Because the blocks within a bucket are sorted, the search is a best-fit one.
  */
-#define NUM_BUCKETS 166
 static header_t buckets[NUM_BUCKETS];
 
 static bool initialized = false;
@@ -102,19 +102,19 @@ static uint16_t mapping_index = 0;
 static uintptr_t mappings[1 << LOG2_NUM_MAPPINGS][2];
 
 static void initialize_buckets();
-static void align_size(size_t* size);
+static size_t aligned(size_t size);
 static header_t* get_block_from_buckets(size_t size);
 static header_t* get_block_from_os(size_t size);
 void* malloc_(size_t size)
 {
-    if (size == 0) {
+    size_t aligned_size = aligned(size);
+    if (size == 0 || aligned_size < size) { // aligned_size < size => overflow
         errno = EINVAL;
         return NULL;
     }
     if (!initialized) initialize_buckets();
-    align_size(&size);
-    header_t* header = get_block_from_buckets(size);
-    if (!header) header = get_block_from_os(size);
+    header_t* header = get_block_from_buckets(aligned_size);
+    if (!header) header = get_block_from_os(aligned_size);
     if (!header) return NULL;
     header->free = false;
     return (void*) ((uintptr_t) header + METADATA_OFFSET);
@@ -165,8 +165,7 @@ void* realloc_(void* ptr, size_t size)
     header_t* block = (header_t*) ((uintptr_t) ptr - METADATA_OFFSET);
     uint64_t old_size = block->size - METADATA_OFFSET - sizeof (footer_t);
     if (size <= old_size) {
-        align_size(&size);
-        return (void*) ((uintptr_t) adjusted_block(block, size) + METADATA_OFFSET);
+        return (void*) ((uintptr_t) adjusted_block(block, aligned(size)) + METADATA_OFFSET);
     }
     void* new_ptr = malloc_(size);
     if (new_ptr) memcpy(new_ptr, ptr, old_size);
@@ -184,20 +183,17 @@ void initialize_buckets()
     initialized = true;
 }
 
-static void round_up_power_of_two(size_t* number, size_t power);
-void align_size(size_t* size)
+static size_t round_up_power_of_two(size_t number, size_t power);
+size_t aligned(size_t size)
 {
-    round_up_power_of_two(size, MEM_UNIT);
-    // TODO: check for overflow
-    *size += METADATA_OFFSET + sizeof (footer_t);
-    *size = *size >= MIN_ALLOC ? *size : MIN_ALLOC;
+    size = round_up_power_of_two(size, MEM_UNIT);
+    size += METADATA_OFFSET + sizeof (footer_t);
+    return size >= MIN_ALLOC ? size : MIN_ALLOC;
 }
 
-void round_up_power_of_two(size_t* number, size_t power)
+inline size_t round_up_power_of_two(size_t number, size_t power)
 {
-    size_t rounded = (*number + (power - 1)) & ~(power - 1);
-    if (rounded < *number) return; // TODO: overflow
-    *number = rounded;
+    return (number + (power - 1)) & ~(power - 1);
 }
 
 static uint8_t bucket_index_from_size(size_t size);
@@ -291,8 +287,11 @@ void insert_into_bucket(header_t* block_to_insert, header_t* bucket)
 static void* get_mapping(size_t size);
 header_t* get_block_from_os(size_t size)
 {
-    size_t requested_size = size;
-    round_up_power_of_two(&requested_size, MMAP_THRESHOLD);
+    size_t requested_size = round_up_power_of_two(size, MMAP_THRESHOLD);
+    if (requested_size < size) { // overflow
+        errno = EINVAL;
+        return NULL;
+    }
     void* new_mapping = get_mapping(requested_size);
     if (!new_mapping) return NULL;
     header_t* main_block = (header_t*) new_mapping;
