@@ -188,13 +188,16 @@ static void round_up_power_of_two(size_t* number, size_t power);
 void align_size(size_t* size)
 {
     round_up_power_of_two(size, MEM_UNIT);
+    // TODO: check for overflow
     *size += METADATA_OFFSET + sizeof (footer_t);
     *size = *size >= MIN_ALLOC ? *size : MIN_ALLOC;
 }
 
-inline void round_up_power_of_two(size_t* number, size_t power)
+void round_up_power_of_two(size_t* number, size_t power)
 {
-    *number = (*number + (power - 1)) & ~(power - 1);
+    size_t rounded = (*number + (power - 1)) & ~(power - 1);
+    if (rounded < *number) return; // TODO: overflow
+    *number = rounded;
 }
 
 static uint8_t bucket_index_from_size(size_t size);
@@ -250,9 +253,8 @@ header_t* adjusted_block(header_t* block, size_t size)
 
 void split_after(header_t* block, size_t size)
 {
-    size_t remaining_size = block->size - size;
     header_t* new_block = (header_t*) ((uintptr_t) block + size);
-    update_size(new_block, remaining_size);
+    update_size(new_block, block->size - size);
     new_block->mapping = block->mapping;
     insert_into_buckets(new_block);
 }
