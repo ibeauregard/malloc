@@ -213,7 +213,7 @@ uint8_t bucket_index_from_size(size_t size)
     static const uint8_t index_1024 = 1024 / MEM_UNIT, log2_1024 = 10;
     if (size < 1024) return size / MEM_UNIT;
     uint8_t log2;
-    for (log2 = log2_1024; 1 << (log2 + 1) <= size; log2++);
+    for (log2 = log2_1024; 1u << (log2 + 1) <= size; log2++);
     return log2 + (index_1024 - log2_1024);
 }
 
