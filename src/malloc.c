@@ -62,7 +62,7 @@ typedef struct footer {
 /*
  * The smallest unit of memory we can request from the OS.
  */
-#define MMAP_THRESHOLD ((1 << 5) * sysconf(_SC_PAGESIZE))
+#define MMAP_UNIT ((1 << 5) * sysconf(_SC_PAGESIZE))
 
 #define NUM_BUCKETS 166
 /*
@@ -287,7 +287,7 @@ void insert_into_bucket(header_t* block_to_insert, header_t* bucket)
 static void* get_mapping(size_t size);
 header_t* get_block_from_os(size_t size)
 {
-    size_t requested_size = round_up_power_of_two(size, MMAP_THRESHOLD);
+    size_t requested_size = round_up_power_of_two(size, MMAP_UNIT);
     if (requested_size < size) { // overflow
         errno = EINVAL;
         return NULL;
