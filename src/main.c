@@ -15,11 +15,11 @@ typedef void free_func(void* ptr);
 static void benchmark(calloc_func* calloc, realloc_func* realloc, free_func* free);
 int main()
 {
-    printf("%s\n", "*** Benchmarking of built-in memory allocation functions ***");
+    printf("%s\n", "*** Benchmarking built-in memory allocation functions ***");
     benchmark(&calloc, &realloc, &free);
     puts("");
 
-    printf("%s\n", "*** Benchmarking of custom memory allocation functions ***");
+    printf("%s\n", "*** Benchmarking custom memory allocation functions ***");
     benchmark(&calloc_, &realloc_, &free_);
 
     return EXIT_SUCCESS;
