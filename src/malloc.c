@@ -9,21 +9,32 @@
 #include <string.h>
 
 /*
- * The smallest unit of memory a user can request: 8 bytes, or 64 bits. We want to stay 8-byte aligned.
+ * The smallest unit of memory a client can request: 8 bytes, or 64 bits. We want to stay 8-byte aligned.
  * This number HAS TO be a power of two.
  */
 #define MEM_UNIT 8 // bytes
 
 /*
+ * The base-2 logarithm of the maximum number of memory mappings that can be stored by this program. Here a memory
+ * mapping means an area of memory mapped by the mmap(2) function. Note that contiguous mappings will be counted as one
+ * single mapping.
+ *
  * Be careful before changing the value of this constant. There will be an impact on the header_t data structure.
  */
 #define LOG2_NUM_MAPPINGS 15
 
 /*
- * An 8-byte data structure that precedes all managed memory blocks. The first 48 bits represent the size
+ * An 24-byte data structure that precedes all managed memory blocks. The first 48 bits represent the size
  * of the block, including its metadata (header and footer). The next 15 bits represent the index of the memory mapping
- * where the block is located. (Memory mappings are created by calls to mmap(2).) The least significant bit is 1
- * if the block is free, 0 otherwise.
+ * where the block is located. (Memory mappings are created by calls to mmap(2).) The least significant bit of the first
+ * byte is 1 if the block is free, 0 otherwise.
+ *
+ * The next and prev members point to the next and previous blocks, respectively, stored in the free block bucket where
+ * this block is stored. Note that buckets store blocks in ascending order of size, not in order of memory address.
+ *
+ * The `next` and `prev` members are only used when the block is free. When the block is allocated, the address of the
+ * `next` member is returned, such that only the first byte of this data structure is expected to be preserved during
+ * the allocation period.
  */
 typedef struct header header_t;
 struct header {
@@ -36,14 +47,14 @@ struct header {
 
 /*
  * This is used to get the offset between the beginning of a block and the beginning of the memory zone where
- * the user can write. The user can write over the `next` and `prev` pointers while the block is in use.
+ * the client can write. The client can write over the `next` and `prev` pointers while the block is in use.
  */
 #define METADATA_OFFSET (sizeof (uint64_t))
 
 /*
- * An 8-byte, single-member data structure that is kept at the end of every managed memory block. It also stores
- * the size of the block, including its metadata (header and footer). The purpose of this structure is to allow the
- * following block in memory to access the size of its previous block. Knowing the size, we can travel back to
+ * An 8-byte, single-member data structure that is kept at the end of every managed memory block. Like the header, it
+ * stores the size of the block, including its metadata (header and footer). The purpose of this structure is to allow
+ * the following block in memory to access the size of its previous block. Knowing the size, we can travel back to
  * the header to know whether the block is free. Note that we could easily have stored the free flag here also, but
  * it seems more cautious to store it in a single place.
  *
@@ -64,9 +75,11 @@ typedef struct footer {
  */
 #define MMAP_UNIT ((1 << 5) * sysconf(_SC_PAGESIZE))
 
+/* The number of free memory block buckets. */
 #define NUM_BUCKETS 166
+
 /*
- * Memory blocks available to the user are stored in buckets, each of which is associated with a certain size range.
+ * Memory blocks available to the client are stored in buckets, each of which is associated with a certain size range.
  * Here is the index-to-size mapping :
  * 0:   0
  * 1:   8
@@ -91,14 +104,26 @@ typedef struct footer {
  * See https://stackoverflow.com/questions/6716946/why-do-x86-64-systems-have-only-a-48-bit-virtual-address-space.
  *
  * Inside each bucket, available blocks are kept sorted in ascending size order. When searching for a free block to
- * allocate to the user, the appropriate bucket is searched, and the first block with a sufficient size is taken.
+ * allocate to the client, the appropriate bucket is searched, and the first block with a sufficient size is taken.
  * Because the blocks within a bucket are sorted, the search is a best-fit one.
  */
 static header_t buckets[NUM_BUCKETS];
 
+/*
+ * Flag to indicate whether the buckets are initialized. Will be and remain set to true after the first call to malloc_.
+ */
 static bool initialized = false;
 
+/*
+ * The index of the next memory mapping returned my mmap(2).
+ */
 static uint16_t mapping_index = 0;
+
+/*
+ * A 2-D array of size 2^LOG2_NUM_MAPPINGS x 2. For each mapping i (0 <= i < 2^LOG2_NUM_MAPPINGS),
+ * mappings[i][0] and mappings[i][1] contain the lower (included) and upper (excluded) bounds, respectively,
+ * of the memory mapping.
+ */
 static uintptr_t mappings[1 << LOG2_NUM_MAPPINGS][2];
 
 static void initialize_buckets();
@@ -120,7 +145,7 @@ void* malloc_(size_t size)
     return (void*) ((uintptr_t) header + METADATA_OFFSET);
 }
 
-static void insert_into_buckets(header_t* block);
+static void insert_into_buckets(header_t* inserted);
 static void coalesce(header_t* lower, header_t* higher);
 void free_(void* ptr)
 {
@@ -173,6 +198,13 @@ void* realloc_(void* ptr, size_t size)
     return new_ptr;
 }
 
+/*
+ * This function is called exactly once, during the very first call to malloc. It stores inside each bucket a copy
+ * of a dummy block header specifying a block size of 0. Also, each dummy header has next and prev pointers that point
+ * to itself. This is done to initialize each bucket as a circular doubly-linked list of headers. The prev pointer is
+ * useful when we want to remove a block (we don't need to iterate through the list to find the block's previous block.)
+ * The circular nature of the list helps manage edge cases (such as removing the tail or the head of the list).
+ */
 void initialize_buckets()
 {
     static const header_t dummy_header = {.size = 0};
@@ -208,6 +240,10 @@ header_t* get_block_from_buckets(size_t size)
     return NULL;
 }
 
+/*
+ * This function maps a block size to the index of the bucket where the block should be stored when it is free.
+ * See the documentation of the `buckets` variable to know the details of the size-to-index mapping.
+ */
 uint8_t bucket_index_from_size(size_t size)
 {
     static const uint8_t index_1024 = 1024 / MEM_UNIT, log2_1024 = 10;
@@ -241,7 +277,7 @@ static void split_after(header_t* block, size_t size);
 static void update_size(header_t* block, size_t size);
 header_t* adjusted_block(header_t* block, size_t size)
 {
-    if (block->size < size + MIN_ALLOC) return block;
+    if (block->size - size < MIN_ALLOC) return block;
     split_after(block, size);
     update_size(block, size);
     return block;
@@ -260,28 +296,23 @@ inline void update_size(header_t* block, size_t size)
     block->size = ((footer_t*) ((uintptr_t) block + size) - 1)->size = size;
 }
 
-static void insert_into_bucket(header_t* block_to_insert, header_t* bucket);
-inline void insert_into_buckets(header_t* block)
-{
-    insert_into_bucket(block, &buckets[bucket_index_from_size(block->size)]);
-}
-
 /*
  * Buckets are kept sorted according to block size ascending order. Ties are broken with an oldest-first rule;
  * see http://gee.cs.oswego.edu/dl/html/malloc.html.
  */
-void insert_into_bucket(header_t* block_to_insert, header_t* bucket)
+void insert_into_buckets(header_t* inserted)
 {
-    header_t* pre_insertion_block;
-    for (pre_insertion_block = bucket; ; pre_insertion_block = pre_insertion_block->next) {
-        uint64_t next_block_size = pre_insertion_block->next->size;
-        if (next_block_size == 0 || next_block_size > block_to_insert->size) break;
-    }
-    block_to_insert->prev = pre_insertion_block;
-    block_to_insert->next = pre_insertion_block->next;
-    pre_insertion_block->next = block_to_insert;
-    block_to_insert->next->prev = block_to_insert;
-    block_to_insert->free = true;
+    header_t* pre_insertion = &buckets[bucket_index_from_size(inserted->size)];
+    do {
+        uint64_t next_block_size = pre_insertion->next->size;
+        if (next_block_size == 0 || next_block_size > inserted->size) break;
+        pre_insertion = pre_insertion->next;
+    } while (true);
+    inserted->prev = pre_insertion;
+    inserted->next = pre_insertion->next;
+    pre_insertion->next = inserted;
+    inserted->next->prev = inserted;
+    inserted->free = true;
 }
 
 static void* get_mapping(size_t size);
@@ -303,7 +334,7 @@ header_t* get_block_from_os(size_t size)
 
 void* get_mapping(size_t size)
 {
-    void* mapping = mmap(0, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    void* mapping = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
     if (mapping == MAP_FAILED) {
         errno = ENOMEM;
         return NULL;
