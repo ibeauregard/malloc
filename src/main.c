@@ -29,14 +29,14 @@ void benchmark(calloc_func* calloc, realloc_func* realloc, free_func* free)
 {
     void* pointers[NUM_POINTERS];
     clock_t start = clock();
-    for (uint16_t i = 0; i < NUM_CYCLES; i++) {
-        for (uint16_t j = 0; j < NUM_POINTERS; j++) {
+    for (unsigned short i = 0; i < NUM_CYCLES; i++) {
+        for (unsigned short j = 0; j < NUM_POINTERS; j++) {
             pointers[j] = calloc(1, rand() % BLOCK_SIZE_UPPER_BOUND);
         }
-        for (uint16_t j = 0; j < NUM_POINTERS; j++) {
+        for (unsigned short j = 0; j < NUM_POINTERS; j++) {
             pointers[j] = realloc(pointers[j], rand() % BLOCK_SIZE_UPPER_BOUND);
         }
-        for (uint16_t j = 0; j < NUM_POINTERS; j++) {
+        for (unsigned short j = 0; j < NUM_POINTERS; j++) {
             free(pointers[j]);
         }
     }
