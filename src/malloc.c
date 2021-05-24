@@ -38,7 +38,7 @@ struct header {
  * This is used to get the offset between the beginning of a block and the beginning of the memory zone where
  * the user can write. The user can write over the `next` and `prev` pointers while the block is in use.
  */
-#define METADATA_OFFSET sizeof (uint64_t)
+#define METADATA_OFFSET (sizeof (uint64_t))
 
 /*
  * An 8-byte, single-member data structure that is kept at the end of every managed memory block. It also stores
