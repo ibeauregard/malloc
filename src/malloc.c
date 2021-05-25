@@ -307,11 +307,10 @@ void insert_into_buckets(header_t* inserted)
         /* This is a one-size bucket; insert block in last position because of the oldest-first rule. */
         pre_insertion = pre_insertion->prev;
     } else {
-        do {
+        for (; true; pre_insertion = pre_insertion->next) {
             uint64_t next_block_size = pre_insertion->next->size;
             if (next_block_size == 0 || next_block_size > inserted->size) break;
-            pre_insertion = pre_insertion->next;
-        } while (true);
+        }
     }
     inserted->prev = pre_insertion;
     inserted->next = pre_insertion->next;
