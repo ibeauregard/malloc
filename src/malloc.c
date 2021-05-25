@@ -303,11 +303,16 @@ inline void update_size(header_t* block, size_t size)
 void insert_into_buckets(header_t* inserted)
 {
     header_t* pre_insertion = &buckets[bucket_index_from_size(inserted->size)];
-    do {
-        uint64_t next_block_size = pre_insertion->next->size;
-        if (next_block_size == 0 || next_block_size > inserted->size) break;
-        pre_insertion = pre_insertion->next;
-    } while (true);
+    if (inserted->size < 1024) {
+        /* This is a one-size bucket; insert block in last position because of the oldest-first rule. */
+        pre_insertion = pre_insertion->prev;
+    } else {
+        do {
+            uint64_t next_block_size = pre_insertion->next->size;
+            if (next_block_size == 0 || next_block_size > inserted->size) break;
+            pre_insertion = pre_insertion->next;
+        } while (true);
+    }
     inserted->prev = pre_insertion;
     inserted->next = pre_insertion->next;
     pre_insertion->next = inserted;
