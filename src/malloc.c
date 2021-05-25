@@ -24,7 +24,7 @@
 #define LOG2_NUM_MAPPINGS 15
 
 /*
- * An 24-byte data structure that precedes all managed memory blocks. The first 48 bits represent the size
+ * A 24-byte data structure that precedes all managed memory blocks. The first 48 bits represent the size
  * of the block, including its metadata (header and footer). The next 15 bits represent the index of the memory mapping
  * where the block is located. (Memory mappings are created by calls to mmap(2).) The least significant bit of the first
  * byte is 1 if the block is free, 0 otherwise.
