@@ -332,8 +332,7 @@ header_t* get_block_from_os(size_t size)
     header_t* main_block = (header_t*) new_mapping;
     update_size(main_block, requested_size);
     main_block->mapping = mapping_index++;
-    main_block = adjusted_block(main_block, size);
-    return main_block;
+    return adjusted_block(main_block, size);
 }
 
 void* get_mapping(size_t size)

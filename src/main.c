@@ -40,6 +40,5 @@ void benchmark(calloc_func* calloc, realloc_func* realloc, free_func* free)
             free(pointers[j]);
         }
     }
-    printf("Completed in %f seconds\n",
-           (float) (clock() - start) / CLOCKS_PER_SEC);
+    printf("Completed in %f seconds\n", (float) (clock() - start) / CLOCKS_PER_SEC);
 }
