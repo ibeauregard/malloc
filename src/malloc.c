@@ -126,7 +126,7 @@ static uint16_t mapping_index = 0;
  */
 static uintptr_t mappings[1 << LOG2_NUM_MAPPINGS][2];
 
-static void initialize_buckets();
+static void initialize_buckets(void);
 static size_t aligned(size_t size);
 static header_t* get_block_from_buckets(size_t size);
 static header_t* get_block_from_os(size_t size);
@@ -205,7 +205,7 @@ void* realloc_(void* ptr, size_t size)
  * useful when we want to remove a block (we don't need to iterate through the list to find the block's previous block.)
  * The circular nature of the list helps manage edge cases (such as removing the tail or the head of the list).
  */
-void initialize_buckets()
+void initialize_buckets(void)
 {
     static const header_t dummy_header = {.size = 0};
     for (uint8_t i = 0; i < NUM_BUCKETS; i++) {

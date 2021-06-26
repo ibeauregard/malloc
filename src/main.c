@@ -13,7 +13,7 @@ typedef void* realloc_func(void* ptr, size_t size);
 typedef void free_func(void* ptr);
 
 static void benchmark(calloc_func* calloc, realloc_func* realloc, free_func* free);
-int main()
+int main(void)
 {
     printf("%s\n", "*** Benchmarking built-in memory allocation functions ***");
     benchmark(&calloc, &realloc, &free);
