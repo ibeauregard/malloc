@@ -252,7 +252,7 @@ uint8_t bucket_index_from_size(size_t size)
     if (size < 1024) return size / MEM_UNIT;
     uint8_t log2;
     for (log2 = log2_1024; size >> (log2 + 1) > 0; log2++);
-    return log2 + (index_1024 - log2_1024);
+    return index_1024 + (log2 - log2_1024);
 }
 
 static void remove_from_bucket(header_t* block);
