@@ -12,29 +12,30 @@
  * The smallest unit of memory a client can request: 8 bytes, or 64 bits. We want to stay 8-byte aligned.
  * This number HAS TO be a power of two.
  */
-#define MEM_UNIT 8 // bytes
+#define MEM_UNIT (uint8_t) 8 // bytes
 
 /*
  * The base-2 logarithm of the maximum number of memory mappings that can be stored by this program. Here a memory
- * mapping means an area of memory mapped by the mmap(2) function. Note that contiguous mappings will be counted as one
- * single mapping.
+ * mapping means an area of memory mapped by the mmap(2) function (https://man7.org/linux/man-pages/man2/mmap.2.html).
+ * Note that contiguous mappings will be counted as one single mapping.
  *
  * Be careful before changing the value of this constant. There will be an impact on the header_t data structure.
  */
-#define LOG2_NUM_MAPPINGS 15
+#define LOG2_NUM_MAPPINGS (uint8_t) 15
 
 /*
  * A 24-byte data structure that precedes all managed memory blocks. The first 48 bits represent the size
  * of the block, including its metadata (header and footer). The next 15 bits represent the index of the memory mapping
  * where the block is located. (Memory mappings are created by calls to mmap(2).) The least significant bit of the first
- * byte is 1 if the block is free, 0 otherwise.
+ * 8 bytes is 1 if the block is free, 0 otherwise.
  *
- * The next and prev members point to the next and previous blocks, respectively, stored in the free block bucket where
- * this block is stored. Note that buckets store blocks in ascending order of size, not in order of memory address.
+ * The next and prev members point to the next and previous blocks, respectively, stored in the bucket of free blocks
+ * where this block is stored. Note that buckets store blocks in ascending order of size, not in order of memory
+ * address.
  *
- * The `next` and `prev` members are only used when the block is free. When the block is allocated, the address of the
- * `next` member is returned, such that only the first byte of this data structure is expected to be preserved during
- * the allocation period.
+ * The `next` and `prev` members are only used when the block is free. At the moment of allocation, the address of the
+ * `next` member is returned, such that only the first 8 bytes of this data structure are expected to be preserved
+ * while the block is in use.
  */
 typedef struct header header_t;
 struct header {
@@ -54,9 +55,9 @@ struct header {
 /*
  * An 8-byte, single-member data structure that is kept at the end of every managed memory block. Like the header, it
  * stores the size of the block, including its metadata (header and footer). The purpose of this structure is to allow
- * the following block in memory to access the size of its previous block. Knowing the size, we can travel back to
- * the header to know whether the block is free. Note that we could easily have stored the free flag here also, but
- * it seems more cautious to store it in a single place.
+ * any block in memory to access the size of its previous block. Knowing its size, we can travel back to
+ * the header to know whether that previous block is free. Note that we could easily have stored the free flag here
+ * also, but it seems more cautious to store it in a single place.
  *
  * Note also that we could have typedef-ed footer_t as an alias for uint64_t, or we could have avoided any typedef
  * altogether here, but this definition makes the program clearer without adding any performance overhead.
@@ -71,12 +72,12 @@ typedef struct footer {
 #define MIN_ALLOC (sizeof (header_t) + sizeof (footer_t))
 
 /*
- * The smallest unit of memory we can request from the OS.
+ * The smallest unit of memory one can request from the OS.
  */
 #define MMAP_UNIT ((1 << 5) * sysconf(_SC_PAGESIZE))
 
 /* The number of free memory block buckets. */
-#define NUM_BUCKETS 166
+#define NUM_BUCKETS (uint8_t) 166
 
 /*
  * Memory blocks available to the client are stored in buckets, each of which is associated with a certain size range.
@@ -88,14 +89,14 @@ typedef struct footer {
  * 4:   32
  * 5:   40
  * ...  ...
- * n:   8*n
+ * n (n < 128):   8*n
  * ...
  * 127: 1016
  * 128: {1024, 1032, 1040, ..., 2032, 2040} == {8*k : 2^7 <= k < 2^8}
  * 129: {8*k : 2^8 <= k < 2^9}
  * 130: {8*k : 2^9 <= k < 2^10}
  * ...  ...
- * n:   {8*k : 2^(n - 121) <= k < 2^(n - 120)}
+ * n (128 <= n < 166):   {8*k : 2^(n - 121) <= k < 2^(n - 120)}
  * ...
  * 165: {8*k : 2^44 <= k < 2^45}
  *
@@ -145,12 +146,13 @@ void* malloc_(size_t size)
     return (void*) ((uintptr_t) header + METADATA_OFFSET);
 }
 
+static header_t* get_block_from_ptr(void* ptr);
 static void insert_into_buckets(header_t* inserted);
 static void coalesce(header_t* lower, header_t* higher);
 void free_(void* ptr)
 {
     if (!ptr) return;
-    header_t* block = (header_t*) ((uintptr_t) ptr - METADATA_OFFSET);
+    header_t* block = get_block_from_ptr(ptr);
     insert_into_buckets(block);
     uintptr_t next_block = (uintptr_t) block + block->size;
 
@@ -187,7 +189,7 @@ void* realloc_(void* ptr, size_t size)
         free_(ptr);
         return malloc_(size);
     }
-    header_t* block = (header_t*) ((uintptr_t) ptr - METADATA_OFFSET);
+    header_t* block = get_block_from_ptr(ptr);
     uint64_t old_size = block->size - METADATA_OFFSET - sizeof (footer_t);
     if (size <= old_size) {
         return (void*) ((uintptr_t) adjusted_block(block, aligned(size)) + METADATA_OFFSET);
@@ -296,6 +298,11 @@ inline void update_size(header_t* block, size_t size)
     block->size = ((footer_t*) ((uintptr_t) block + size) - 1)->size = size;
 }
 
+inline header_t* get_block_from_ptr(void* ptr)
+{
+    return (header_t*) ((uintptr_t) ptr - METADATA_OFFSET);
+}
+
 /*
  * Buckets are kept sorted according to block size ascending order. Ties are broken with an oldest-first rule;
  * see http://gee.cs.oswego.edu/dl/html/malloc.html.
@@ -322,15 +329,15 @@ void insert_into_buckets(header_t* inserted)
 static void* get_mapping(size_t size);
 header_t* get_block_from_os(size_t size)
 {
-    size_t requested_size = round_up_power_of_two(size, MMAP_UNIT);
-    if (requested_size < size) { // overflow
+    size_t size_requested_from_os = round_up_power_of_two(size, MMAP_UNIT);
+    if (size_requested_from_os < size) { // overflow
         errno = EINVAL;
         return NULL;
     }
-    void* new_mapping = get_mapping(requested_size);
+    void* new_mapping = get_mapping(size_requested_from_os);
     if (!new_mapping) return NULL;
     header_t* main_block = (header_t*) new_mapping;
-    update_size(main_block, requested_size);
+    update_size(main_block, size_requested_from_os);
     main_block->mapping = mapping_index++;
     return adjusted_block(main_block, size);
 }
