@@ -348,17 +348,20 @@ void* get_mapping(size_t size)
         errno = ENOMEM;
         return NULL;
     }
-    /* If this mapping begins where the previous one ended, merge them */
-    if (mapping_index > 0 && (uintptr_t) mapping == mappings[mapping_index - 1][1]) {
-        mappings[--mapping_index][1] += size;
-    } else {
-        if (mapping_index == 1 << LOG2_NUM_MAPPINGS) {
-            fprintf(stderr, "malloc: reached maximum number of memory mappings: %u\n", 1 << LOG2_NUM_MAPPINGS);
-            return NULL;
+    /* If this mapping begins where any previous one ended, merge them */
+    for (uint16_t index = mapping_index; index > 0; index--) {
+        if ((uintptr_t) mapping == mappings[index - 1][1]) {
+            mappings[index - 1][1] += size;
+            mapping_index--;
+            return mapping;
         }
-        mappings[mapping_index][0] = (uintptr_t) mapping;
-        mappings[mapping_index][1] = (uintptr_t) mapping + size;
     }
+    if (mapping_index == 1 << LOG2_NUM_MAPPINGS) {
+        fprintf(stderr, "malloc: reached maximum number of memory mappings: %u\n", 1 << LOG2_NUM_MAPPINGS);
+        return NULL;
+    }
+    mappings[mapping_index][0] = (uintptr_t) mapping;
+    mappings[mapping_index][1] = (uintptr_t) mapping + size;
     return mapping;
 }
 
