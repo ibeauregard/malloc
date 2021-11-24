@@ -20,7 +20,7 @@ To run the benchmark, first run `make` from the project's root directory. Then, 
 ## Potential downsides and areas of improvement
 The main danger that I see with this implementation is the lack of error detection. More precisely, no checks are made to ensure that header and footer metadata were unaltered during client use. Corruption of this metadata will break the program. A way of dealing with this would be to include some sort of checksum verification.
 
-Also, blocks under management by this implementation have a minimum size of 32 bytes. In a  program where the client only ever needs very small blocks, i.e., blocks of 16 bytes (to store two pointers on a system with 8-byte pointers), memory allocation will suffer a 100% overhead.
+Also, blocks under management by this implementation have a minimum size of 32 bytes. In a program where the client only ever needs very small blocks, i.e., blocks of 16 bytes (to store two pointers on a system with 8-byte pointers), memory allocation will suffer a 100% overhead.
 
 Even though I had to conduct a fair deal of research to build this project, I still by no means consider myself to be an expert – or even a knowledgeable person – in dynamic memory management.
 
