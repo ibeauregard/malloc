@@ -154,15 +154,15 @@ void free_(void* ptr)
     if (!ptr) return;
     header_t* block = get_block_from_ptr(ptr);
     insert_into_buckets(block);
-    uintptr_t next_block = (uintptr_t) block + block->size;
 
-    /* If next_block >= mappings[block->mapping][1],
-     * next_block does not point to a memory block under our management. */
-    if (next_block < mappings[block->mapping][1] && (bool) ((header_t*) next_block)->free) {
+    uintptr_t next_block = (uintptr_t) block + block->size;
+    bool next_block_is_under_our_management = next_block < mappings[block->mapping][1];
+    if (next_block_is_under_our_management && (bool) ((header_t*) next_block)->free) {
         coalesce(block, (header_t*) next_block);
     }
-    /* If block is the first block of its mapping, there is no previous block to potentially coalesce with. */
-    if ((uintptr_t) block == mappings[block->mapping][0]) return;
+
+    bool block_is_first_of_its_mapping = (uintptr_t) block == mappings[block->mapping][0];
+    if (block_is_first_of_its_mapping) return;
     header_t* previous_block = (header_t*) ((uintptr_t) block - ((footer_t*) block - 1)->size);
     if (previous_block->free) {
         coalesce(previous_block, block);
