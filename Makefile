@@ -1,6 +1,5 @@
 CC = gcc
 CFLAGS += -Wall -Wextra -Werror -Wpedantic -g3
-SANITIZE = -fsanitize=address
 LINKERFLAG = -lm
 SRCS = $(wildcard src/*.c)
 OBJS = $(SRCS:.c=.o)
@@ -11,7 +10,7 @@ MAIN = my_malloc
 all: $(MAIN)
 
 $(MAIN): $(OBJS)
-	$(CC) $(CFLAGS) $(SANITIZE) -o $@ $(LINKERFLAG) $^
+	$(CC) $(CFLAGS) -o $@ $(LINKERFLAG) $^
 
 clean:
 	$(RM) $(OBJS)
