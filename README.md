@@ -1,5 +1,7 @@
 # my_malloc
 
+You can read my [Substack post that I wrote about this project](https://ianbeauregard.substack.com/p/implementing-malloc-and-co).
+
 ## Disclaimer
 This project was done solely for educational purposes. It is by no means intended for use in a production environment.
 
