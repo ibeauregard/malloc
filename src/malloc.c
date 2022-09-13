@@ -218,13 +218,26 @@ void initialize_buckets(void)
 }
 
 static size_t round_up_power_of_two(size_t number, size_t power);
+/*
+ * This function takes a `size` requested by the client and converts it
+ * to the smallest size that is greater to or equal to said requested size
+ * while complying with the application's requirements.
+ *
+ * First, we add to the requested size the METADATA_OFFSET and the size of the footer.
+ * We then round up that new size to the smallest multiple of MEM_UNIT that is greater or equal to the new size.
+ * Finally, we return the maximum between the rounded-up size and MIN_ALLOC,
+ * to make sure we never allocate less than MIN_ALLOC.
+ */
 size_t aligned(size_t size)
 {
-    size = round_up_power_of_two(size, MEM_UNIT);
-    size += METADATA_OFFSET + sizeof (footer_t);
+    size = round_up_power_of_two(size + METADATA_OFFSET + sizeof (footer_t), MEM_UNIT);
     return size >= MIN_ALLOC ? size : MIN_ALLOC;
 }
 
+/*
+ * This function returns the smallest multiple of `power` that is greater or equal to `number`.
+ * It assumes that `power` is a power of 2.
+ */
 inline size_t round_up_power_of_two(size_t number, size_t power)
 {
     return (number + (power - 1)) & ~(power - 1);
@@ -232,6 +245,10 @@ inline size_t round_up_power_of_two(size_t number, size_t power)
 
 static uint8_t bucket_index_from_size(size_t size);
 static header_t* get_block_from_bucket(header_t* bucket, size_t size);
+/*
+ * This function tries to return a block of at least `size` bytes from the free block storage.
+ * If it cannot find one, it returns NULL.
+ */
 header_t* get_block_from_buckets(size_t size)
 {
     for (uint8_t i = bucket_index_from_size(size); i < NUM_BUCKETS ; i++)
@@ -256,6 +273,13 @@ uint8_t bucket_index_from_size(size_t size)
 }
 
 static void remove_from_bucket(header_t* block);
+/*
+ * This function searches the bucket `bucket` for a block of at least `size` bytes.
+ * When it finds one, it removes it from the bucket and returns a block of exactly `size` bytes
+ * taken from the removed block.
+ *
+ * If the function cannot find a block of at least `size` bytes within the `bucket`, it returns NULL.
+ */
 header_t* get_block_from_bucket(header_t* bucket, size_t size)
 {
     header_t* block = bucket;
@@ -277,6 +301,9 @@ void remove_from_bucket(header_t* block)
 
 static void split_after(header_t* block, size_t size);
 static void update_size(header_t* block, size_t size);
+/*
+ * This function takes a `block`, adjusts it to be of `size` bytes and returns the adjusted block.
+ */
 header_t* adjusted_block(header_t* block, size_t size)
 {
     if (block->size - size < MIN_ALLOC) return block;
@@ -285,6 +312,11 @@ header_t* adjusted_block(header_t* block, size_t size)
     return block;
 }
 
+/*
+ * This function creates a new block from `block`. That new block's range consists of
+ * all the bytes starting at `block` + size until the end of `block`, and has the same mapping index as `block`.
+ * It gets stored as a free block available for client requests.
+ */
 void split_after(header_t* block, size_t size)
 {
     header_t* new_block = (header_t*) ((uintptr_t) block + size);
@@ -298,6 +330,10 @@ inline void update_size(header_t* block, size_t size)
     block->size = ((footer_t*) ((uintptr_t) block + size) - 1)->size = size;
 }
 
+/*
+ * This function takes a pointer `ptr`, which is the address of a memory block from the client's point of view.
+ * It returns the address of the memory block's header.
+ */
 inline header_t* get_block_from_ptr(void* ptr)
 {
     return (header_t*) ((uintptr_t) ptr - METADATA_OFFSET);
@@ -327,6 +363,12 @@ void insert_into_buckets(header_t* inserted)
 }
 
 static void* get_mapping(size_t size);
+/*
+ * This function requests from the OS a block of memory whose size is the smallest multiple of MMAP_UNIT
+ * that is greater or equal to `size` bytes.
+ *
+ * It returns a block consisting of the first `size` bytes from the block returned by the OS.
+ */
 header_t* get_block_from_os(size_t size)
 {
     size_t size_requested_from_os = round_up_power_of_two(size, MMAP_UNIT);
@@ -341,6 +383,10 @@ header_t* get_block_from_os(size_t size)
     return adjusted_block(main_block, size);
 }
 
+/*
+ * This function gets a memory mapping of `size` bytes from the OS, stores the start and end addresses of the mapping
+ * in the `mappings` static variable and returns the mapping.
+ */
 void* get_mapping(size_t size)
 {
     void* mapping = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
